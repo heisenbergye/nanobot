@@ -3,6 +3,7 @@
 cd /d/Users/zyzhan/projects/nanobot
 source .venv/Scripts/activate
 
+git clone https://github.com/heisenbergye/searxng.git
 # 後台啟動 SearXNG
 python start_searxng.py --port 8888 &
 
