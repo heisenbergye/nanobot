@@ -30,3 +30,4 @@ botpy.log
 # Node
 node_modules/
 package-lock.json
+searxng/
