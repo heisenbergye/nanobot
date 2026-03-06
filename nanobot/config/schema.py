@@ -262,6 +262,13 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
+class BedrockConfig(Base):
+    """AWS Bedrock provider configuration."""
+
+    api_key: str | None = None  # Bedrock API Key; None = use IAM auth
+    region: str = "us-east-1"
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
@@ -286,6 +293,7 @@ class ProvidersConfig(Base):
     )  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    bedrock: BedrockConfig = Field(default_factory=BedrockConfig)  # AWS Bedrock (native boto3)
 
 
 class HeartbeatConfig(Base):
@@ -306,7 +314,9 @@ class GatewayConfig(Base):
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    api_key: str = ""  # Brave Search API key
+    provider: str = "brave"  # "brave" or "searxng"
+    api_key: str = ""  # Brave Search API key (for brave provider)
+    searxng_url: str = ""  # SearXNG instance URL, e.g. "http://localhost:8080"
     max_results: int = 5
 
 
@@ -338,11 +348,27 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
 
 
+class RSSFeedConfig(Base):
+    """RSS feed configuration."""
+
+    id: str = ""  # Unique feed ID
+    name: str = ""  # Display name
+    url: str = ""  # RSS feed URL
+    enabled: bool = True
+
+
+class NewsConfig(Base):
+    """News tool configuration."""
+
+    feeds: list[RSSFeedConfig] = Field(default_factory=list)  # Custom RSS feeds
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    news: NewsConfig = Field(default_factory=NewsConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
@@ -369,6 +395,9 @@ class Config(BaseSettings):
 
         forced = self.agents.defaults.provider
         if forced != "auto":
+            # Special case: Bedrock uses IAM auth, not API key
+            if forced == "bedrock":
+                return self.providers.bedrock, "bedrock"
             p = getattr(self.providers, forced, None)
             return (p, forced) if p else (None, None)
 

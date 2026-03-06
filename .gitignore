@@ -21,3 +21,11 @@ poetry.lock
 .pytest_cache/
 botpy.log
 
+
+# IDE
+.vscode/
+.idea/
+
+# Node
+node_modules/
+package-lock.json

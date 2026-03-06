@@ -22,6 +22,9 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.browser import BrowserTool, PLAYWRIGHT_AVAILABLE
+from nanobot.agent.tools.news import NewsTool
+from nanobot.canvas.tool import CanvasTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -65,6 +68,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        config: Any | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -80,6 +84,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self._config = config
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -123,12 +128,32 @@ class AgentLoop:
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
         ))
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
+        # Web search - support both Brave and SearXNG
+        search_provider = "brave"
+        searxng_url = None
+        if self._config and hasattr(self._config, "tools"):
+            search_cfg = self._config.tools.web.search
+            search_provider = search_cfg.provider or "brave"
+            searxng_url = search_cfg.searxng_url or None
+        self.tools.register(WebSearchTool(
+            api_key=self.brave_api_key,
+            proxy=self.web_proxy,
+            provider=search_provider,
+            searxng_url=searxng_url,
+        ))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        if PLAYWRIGHT_AVAILABLE:
+            self.tools.register(BrowserTool())
+        self.tools.register(CanvasTool())
+        # Register news tool with config if available
+        if self._config:
+            self.tools.register(NewsTool.from_config(self._config))
+        else:
+            self.tools.register(NewsTool())
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -236,7 +261,9 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    # Show more content for message tool to debug
+                    log_len = 2000 if tool_call.name == "message" else 200
+                    logger.info("Tool call: {}({})", tool_call.name, args_str[:log_len])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result

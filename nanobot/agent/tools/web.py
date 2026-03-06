@@ -45,7 +45,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using Brave Search API or SearXNG."""
 
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -58,10 +58,19 @@ class WebSearchTool(Tool):
         "required": ["query"]
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5, proxy: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 5,
+        proxy: str | None = None,
+        provider: str = "brave",
+        searxng_url: str | None = None,
+    ):
         self._init_api_key = api_key
         self.max_results = max_results
         self.proxy = proxy
+        self.provider = provider
+        self.searxng_url = searxng_url
 
     @property
     def api_key(self) -> str:
@@ -69,6 +78,48 @@ class WebSearchTool(Tool):
         return self._init_api_key or os.environ.get("BRAVE_API_KEY", "")
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        n = min(max(count or self.max_results, 1), 10)
+
+        if self.provider == "searxng" and self.searxng_url:
+            return await self._search_searxng(query, n)
+        else:
+            return await self._search_brave(query, n)
+
+    async def _search_searxng(self, query: str, count: int) -> str:
+        """Search using SearXNG instance."""
+        try:
+            url = self.searxng_url.rstrip("/") + "/search"
+            logger.debug("SearXNG search: {} (proxy: {})", query, "enabled" if self.proxy else "disabled")
+
+            async with httpx.AsyncClient(proxy=self.proxy, timeout=15.0) as client:
+                r = await client.get(
+                    url,
+                    params={"q": query, "format": "json", "pageno": 1},
+                    headers={"Accept": "application/json"},
+                )
+                r.raise_for_status()
+
+            data = r.json()
+            results = data.get("results", [])[:count]
+
+            if not results:
+                return f"No results for: {query}"
+
+            lines = [f"Results for: {query}\n"]
+            for i, item in enumerate(results, 1):
+                title = item.get("title", "")
+                item_url = item.get("url", "")
+                lines.append(f"{i}. {title}\n   {item_url}")
+                if content := item.get("content"):
+                    lines.append(f"   {content[:200]}")
+            return "\n".join(lines)
+
+        except Exception as e:
+            logger.error("SearXNG search error: {}", e)
+            return f"Error: {e}"
+
+    async def _search_brave(self, query: str, count: int) -> str:
+        """Search using Brave Search API."""
         if not self.api_key:
             return (
                 "Error: Brave Search API key not configured. Set it in "
@@ -77,18 +128,17 @@ class WebSearchTool(Tool):
             )
 
         try:
-            n = min(max(count or self.max_results, 1), 10)
             logger.debug("WebSearch: {}", "proxy enabled" if self.proxy else "direct connection")
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
+                    params={"q": query, "count": count},
                     headers={"Accept": "application/json", "X-Subscription-Token": self.api_key},
                     timeout=10.0
                 )
                 r.raise_for_status()
 
-            results = r.json().get("web", {}).get("results", [])[:n]
+            results = r.json().get("web", {}).get("results", [])[:count]
             if not results:
                 return f"No results for: {query}"
 

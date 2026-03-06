@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nanobot Canvas</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 { font-size: 1.5rem; }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+        .status-dot.connected { background: #44ff44; }
+        .content-area {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-height: 400px;
+        }
+        .content-area h2 { margin-bottom: 20px; color: #333; }
+        .markdown-content { line-height: 1.6; }
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+            margin: 1em 0 0.5em;
+        }
+        .markdown-content p { margin: 0.5em 0; }
+        .markdown-content code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', monospace;
+        }
+        .markdown-content pre {
+            background: #f8f8f8;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+        .markdown-content pre code { background: none; padding: 0; }
+        .component {
+            margin: 20px 0;
+            padding: 20px;
+            background: #fafafa;
+            border-radius: 8px;
+            border: 1px solid #eee;
+        }
+        .component-title {
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #555;
+        }
+        .chart-container { max-width: 600px; margin: 0 auto; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th { background: #f0f0f0; font-weight: 600; }
+        tr:hover { background: #f9f9f9; }
+        .code-block {
+            background: #1e1e1e;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .code-block pre {
+            margin: 0;
+            padding: 15px;
+            overflow-x: auto;
+        }
+        .code-block code { color: #d4d4d4; }
+        .image-component img {
+            max-width: 100%;
+            border-radius: 8px;
+        }
+        .empty-state {
+            text-align: center;
+            color: #999;
+            padding: 60px 20px;
+        }
+        .empty-state .icon { font-size: 4rem; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 id="canvas-title">🐈 nanobot Canvas</h1>
+            <div class="status">
+                <div class="status-dot" id="status-dot"></div>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </header>
+        <div class="content-area">
+            <div id="content" class="markdown-content"></div>
+            <div id="components"></div>
+            <div id="empty-state" class="empty-state">
+                <div class="icon">🎨</div>
+                <p>Canvas is ready. The agent can display content here.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const WS_URL = `ws://${location.hostname || '127.0.0.1'}:18791`;
+        let ws = null;
+        let charts = {};
+
+        function connect() {
+            ws = new WebSocket(WS_URL);
+            
+            ws.onopen = () => {
+                document.getElementById('status-dot').classList.add('connected');
+                document.getElementById('status-text').textContent = 'Connected';
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status-dot').classList.remove('connected');
+                document.getElementById('status-text').textContent = 'Disconnected';
+                setTimeout(connect, 3000);
+            };
+            
+            ws.onerror = () => {
+                document.getElementById('status-text').textContent = 'Connection error';
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+        }
+
+        function handleMessage(msg) {
+            const emptyState = document.getElementById('empty-state');
+            
+            if (msg.type === 'state') {
+                renderState(msg.data);
+            } else if (msg.type === 'update') {
+                if (msg.data.title) {
+                    document.getElementById('canvas-title').textContent = '🐈 ' + msg.data.title;
+                }
+                if (msg.data.content !== undefined) {
+                    renderContent(msg.data.content);
+                }
+            } else if (msg.type === 'add_component') {
+                addComponent(msg.data);
+                emptyState.style.display = 'none';
+            } else if (msg.type === 'clear_components') {
+                document.getElementById('components').innerHTML = '';
+                charts = {};
+            }
+        }
+
+        function renderState(state) {
+            document.getElementById('canvas-title').textContent = '🐈 ' + state.title;
+            renderContent(state.content);
+            
+            const componentsEl = document.getElementById('components');
+            componentsEl.innerHTML = '';
+            charts = {};
+            
+            state.components.forEach(addComponent);
+            
+            const emptyState = document.getElementById('empty-state');
+            emptyState.style.display = (state.content || state.components.length) ? 'none' : 'block';
+        }
+
+        function renderContent(content) {
+            const el = document.getElementById('content');
+            if (content) {
+                el.innerHTML = marked.parse(content);
+                el.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+                document.getElementById('empty-state').style.display = 'none';
+            } else {
+                el.innerHTML = '';
+            }
+        }
+
+        function addComponent(comp) {
+            const container = document.getElementById('components');
+            const div = document.createElement('div');
+            div.className = 'component';
+            
+            if (comp.title) {
+                const title = document.createElement('div');
+                title.className = 'component-title';
+                title.textContent = comp.title;
+                div.appendChild(title);
+            }
+            
+            if (comp.type === 'chart') {
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                const canvas = document.createElement('canvas');
+                const chartId = 'chart-' + Date.now();
+                canvas.id = chartId;
+                chartDiv.appendChild(canvas);
+                div.appendChild(chartDiv);
+                container.appendChild(div);
+                
+                const ctx = canvas.getContext('2d');
+                charts[chartId] = new Chart(ctx, {
+                    type: comp.chart_type || 'line',
+                    data: {
+                        labels: comp.data.labels || [],
+                        datasets: [{
+                            label: comp.data.label || 'Data',
+                            data: comp.data.values || [],
+                            borderColor: '#667eea',
+                            backgroundColor: comp.chart_type === 'pie' ? 
+                                ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe'] :
+                                'rgba(102, 126, 234, 0.1)',
+                            tension: 0.3,
+                        }]
+                    },
+                    options: { responsive: true }
+                });
+            } else if (comp.type === 'table') {
+                const table = document.createElement('table');
+                if (comp.data.columns) {
+                    const thead = document.createElement('thead');
+                    const tr = document.createElement('tr');
+                    comp.data.columns.forEach(col => {
+                        const th = document.createElement('th');
+                        th.textContent = col;
+                        tr.appendChild(th);
+                    });
+                    thead.appendChild(tr);
+                    table.appendChild(thead);
+                }
+                if (comp.data.rows) {
+                    const tbody = document.createElement('tbody');
+                    comp.data.rows.forEach(row => {
+                        const tr = document.createElement('tr');
+                        row.forEach(cell => {
+                            const td = document.createElement('td');
+                            td.textContent = cell;
+                            tr.appendChild(td);
+                        });
+                        tbody.appendChild(tr);
+                    });
+                    table.appendChild(tbody);
+                }
+                div.appendChild(table);
+                container.appendChild(div);
+            } else if (comp.type === 'code') {
+                const codeDiv = document.createElement('div');
+                codeDiv.className = 'code-block';
+                const pre = document.createElement('pre');
+                const code = document.createElement('code');
+                code.className = `language-${comp.language || 'text'}`;
+                code.textContent = comp.content;
+                pre.appendChild(code);
+                codeDiv.appendChild(pre);
+                div.appendChild(codeDiv);
+                container.appendChild(div);
+                hljs.highlightElement(code);
+            } else if (comp.type === 'image') {
+                const img = document.createElement('img');
+                img.src = comp.url;
+                img.alt = comp.title || 'Image';
+                div.className += ' image-component';
+                div.appendChild(img);
+                container.appendChild(div);
+            }
+        }
+
+        connect();
+    </script>
+</body>
+</html>
