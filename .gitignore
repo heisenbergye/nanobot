@@ -1,4 +1,5 @@
 .worktrees/
+.kiro/
 .assets
 .env
 *.pyc

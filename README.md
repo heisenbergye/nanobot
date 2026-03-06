@@ -12,6 +12,13 @@
   </p>
 </div>
 
+> 🔱 **Fork Notice:** This is a personal fork of [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with additional features:
+> - **AWS Bedrock** — Native boto3 provider with cross-region inference
+> - **SearXNG** — Self-hosted search backend (no API key needed)
+> - **News Tool** — RSS feeds + China trending platforms
+> - **Canvas** — WebSocket visual workspace for charts/tables
+> - **Browser** — Playwright-based local preview tool
+
 🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
 ⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
@@ -119,7 +126,7 @@ pip install nanobot-ai
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · For web search, use [SearXNG](#searxng-self-hosted-search) (self-hosted, no API key needed)
 
 **1. Initialize**
 
@@ -683,6 +690,7 @@ Config file: `~/.nanobot/config.json`
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+| `bedrock` | LLM (AWS Bedrock, native boto3) | [AWS Console](https://console.aws.amazon.com/bedrock) |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 
@@ -775,6 +783,63 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><b>AWS Bedrock (Native boto3)</b></summary>
+
+Uses native AWS boto3 Converse API — no LiteLLM overhead. Supports cross-region inference.
+
+**1. Configure AWS credentials** (any standard method):
+- Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- AWS CLI profile: `aws configure`
+- IAM role (EC2/Lambda)
+
+**2. Add to config** (merge into `~/.nanobot/config.json`):
+
+*Provider (optional — region defaults to `us-east-1`):*
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-west-2"
+    }
+  }
+}
+```
+
+*Model (use `bedrock/` prefix):*
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"
+    }
+  }
+}
+```
+
+**Cross-region inference:**
+
+For cross-region models, use the region prefix in the model ID:
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    }
+  }
+}
+```
+
+The provider auto-detects the region from `us.` / `eu.` prefixes.
+
+**Supported models:**
+- Claude: `anthropic.claude-3-5-sonnet-*`, `anthropic.claude-3-haiku-*`, `anthropic.claude-3-opus-*`
+- Llama: `meta.llama3-*-instruct-*`
+- Mistral: `mistral.mistral-*`
+- Amazon: `amazon.titan-*`
 
 </details>
 
@@ -876,6 +941,79 @@ Use `toolTimeout` to override the default 30s per-call timeout for slow servers:
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 
+### SearXNG (Self-hosted Search)
+
+Use a local [SearXNG](https://github.com/searxng/searxng) instance instead of Brave Search API — free, private, and no API key required.
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "searxng",
+        "searxngUrl": "http://127.0.0.1:8888"
+      }
+    }
+  }
+}
+```
+
+> **Windows:** Use [SearXNG for Windows](https://github.com/mbaozi/SearXNGforWindows/) for easy setup.
+
+
+### News Tool
+
+Built-in news aggregation with RSS feeds and trending platforms.
+
+**Built-in trending platforms:** Weibo, Zhihu, Baidu, Douyin, Bilibili, Toutiao, Pengpai, Wallstreetcn, cls.cn, ifeng, Tieba
+
+**Built-in RSS feeds:** Hacker News, GitHub Blog, Kubernetes, Lobsters, Ruanyifeng
+
+**Custom RSS feeds:**
+```json
+{
+  "tools": {
+    "news": {
+      "feeds": [
+        {"id": "aws-blog", "name": "AWS Blog", "url": "https://aws.amazon.com/blogs/aws/feed/", "enabled": true}
+      ]
+    }
+  }
+}
+```
+
+
+### Canvas (Visual Workspace)
+
+WebSocket-based visual workspace for displaying charts, tables, code, and markdown content.
+
+**Features:**
+- Display markdown/HTML content
+- Add charts (line, bar, pie, area)
+- Add data tables
+- Add syntax-highlighted code blocks
+- Add images
+
+**Access:** Open `http://127.0.0.1:18791` or `canvas/static/index.html` when gateway is running.
+
+The agent can use the `canvas` tool to display visual content — just ask it to "show a chart" or "display this data".
+
+
+### Browser Tool
+
+Playwright-based browser control for Canvas preview and local file viewing.
+
+**Allowed URLs only:**
+- `localhost` / `127.0.0.1` — Canvas preview
+- `file://` — Local HTML files
+
+> ⚠️ External websites are blocked. Use `web_search` + `web_fetch` for web content.
+
+**Dependencies:**
+```bash
+pip install playwright
+playwright install chromium
+```
 
 
 ### Security
