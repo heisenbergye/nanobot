@@ -33,7 +33,10 @@ class NewsTool(Tool):
     """Tool to fetch news from RSS feeds and trending platforms."""
 
     # NewsNow API for trending topics
-    NEWSNOW_API = "https://newsnow.busiyi.world/api/s"
+    # Project: https://github.com/ourongxing/newsnow
+    # Local deployment: http://localhost:8889 (fallback to public API)
+    NEWSNOW_API = "http://localhost:8889/api/s"
+    NEWSNOW_API_FALLBACK = "https://www.newsnow.world/api/s"
 
     # Default headers (mimic real browser to avoid 403)
     # Note: Don't include Accept-Encoding to let httpx handle decompression automatically
@@ -74,21 +77,68 @@ class NewsTool(Tool):
             "name": "阮一峰的网络日志",
             "url": "http://www.ruanyifeng.com/blog/atom.xml",
         },
+        "reddit-programming": {
+            "name": "Reddit r/programming",
+            "url": "https://www.reddit.com/r/programming/.rss",
+        },
+        "reddit-technology": {
+            "name": "Reddit r/technology",
+            "url": "https://www.reddit.com/r/technology/.rss",
+        },
     }
 
     # Popular trending platforms (via NewsNow API)
     TRENDING_PLATFORMS = {
+        # 中國熱搜/社交
         "weibo": "微博热搜",
         "zhihu": "知乎热榜",
         "baidu": "百度热搜",
         "douyin": "抖音热榜",
         "bilibili-hot-search": "B站热搜",
         "toutiao": "今日头条",
+        "tieba": "贴吧热议",
+        "hupu": "虎扑热帖",
+        "douban": "豆瓣热门电影",
+        "kuaishou": "快手热点",
+        "ifeng": "凤凰网热点",
+        "tencent-hot": "腾讯新闻",
         "thepaper": "澎湃新闻",
-        "wallstreetcn-hot": "华尔街见闻",
+        "nowcoder": "牛客热榜",
+        "chongbuluo-hot": "虫部落最热",
+        # 科技
+        "v2ex": "V2EX",
+        "ithome": "IT之家",
+        "36kr": "36氪快讯",
+        "36kr-renqi": "36氪人气榜",
+        "sspai": "少数派",
+        "juejin": "稀土掘金",
+        "solidot": "Solidot",
+        "coolapk": "酷安",
+        "freebuf": "Freebuf安全",
+        "pcbeta": "远景论坛Win11",
+        # 國際科技
+        "hackernews": "Hacker News",
+        "producthunt": "Product Hunt",
+        "github": "GitHub Trending",
+        # 財經
+        "wallstreetcn-hot": "华尔街见闻热门",
+        "wallstreetcn-quick": "华尔街见闻快讯",
         "cls-hot": "财联社热门",
-        "ifeng": "凤凰网",
-        "tieba": "贴吧",
+        "cls-telegraph": "财联社电报",
+        "xueqiu": "雪球热门股票",
+        "gelonghui": "格隆汇",
+        "jin10": "金十数据",
+        "fastbull": "法布财经",
+        "mktnews": "MKTNews快讯",
+        # 國際新聞
+        "zaobao": "联合早报",
+        "cankaoxiaoxi": "参考消息",
+        "sputniknewscn": "卫星通讯社",
+        "kaopu": "靠谱新闻",
+        # 娛樂
+        "steam": "Steam在线人数",
+        "qqvideo": "腾讯视频热搜",
+        "iqiyi": "爱奇艺热播",
     }
 
     def __init__(self, custom_feeds: dict[str, dict] | None = None):
@@ -323,41 +373,52 @@ Actions:
         if platform not in self.TRENDING_PLATFORMS:
             return f"Unknown platform: {platform}. Use list_platforms to see available platforms."
 
-        try:
-            url = f"{self.NEWSNOW_API}?id={platform}&latest"
+        # Try local API first, fallback to public API
+        apis = [self.NEWSNOW_API, self.NEWSNOW_API_FALLBACK]
+        last_error = None
 
-            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                resp = await client.get(url, headers=self.API_HEADERS)
-                resp.raise_for_status()
-                data = resp.json()
+        for api_base in apis:
+            try:
+                url = f"{api_base}?id={platform}&latest"
 
-            status = data.get("status", "")
-            if status not in ["success", "cache"]:
-                return f"API error: {data.get('message', 'Unknown error')}"
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                    resp = await client.get(url, headers=self.API_HEADERS)
+                    resp.raise_for_status()
+                    data = resp.json()
 
-            items = data.get("items", [])[:max_items]
-            if not items:
-                return f"No trending items for {platform}"
-
-            # Format output
-            platform_name = self.TRENDING_PLATFORMS[platform]
-            status_info = "🔴 实时" if status == "success" else "📦 缓存"
-            lines = [f"🔥 {platform_name} {status_info} ({len(items)} items)\n"]
-
-            for i, item in enumerate(items, 1):
-                title = item.get("title", "")
-                if not title or isinstance(title, float):
+                status = data.get("status", "")
+                if status not in ["success", "cache"]:
+                    last_error = f"API error: {data.get('message', 'Unknown error')}"
                     continue
-                url = item.get("url", "")
-                lines.append(f"{i}. {title}")
-                if url:
-                    lines.append(f"   🔗 {url}")
-                lines.append("")
 
-            return "\n".join(lines)
+                items = data.get("items", [])[:max_items]
+                if not items:
+                    return f"No trending items for {platform}"
 
-        except httpx.TimeoutException:
-            return f"Timeout fetching trending: {platform}"
-        except Exception as e:
-            logger.error("Trending fetch error: {}", e)
-            return f"Error fetching trending: {e}"
+                # Format output
+                platform_name = self.TRENDING_PLATFORMS[platform]
+                status_info = "🔴 实时" if status == "success" else "📦 缓存"
+                lines = [f"🔥 {platform_name} {status_info} ({len(items)} items)\n"]
+
+                for i, item in enumerate(items, 1):
+                    title = item.get("title", "")
+                    if not title or isinstance(title, float):
+                        continue
+                    item_url = item.get("url", "")
+                    lines.append(f"{i}. {title}")
+                    if item_url:
+                        lines.append(f"   🔗 {item_url}")
+                    lines.append("")
+
+                return "\n".join(lines)
+
+            except httpx.TimeoutException:
+                last_error = f"Timeout fetching from {api_base}"
+                continue
+            except Exception as e:
+                last_error = str(e)
+                logger.debug("Trending fetch error from {}: {}", api_base, e)
+                continue
+
+        logger.error("Trending fetch error (all APIs failed): {}", last_error)
+        return f"Error fetching trending: {last_error}"
